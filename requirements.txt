@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+pydantic-settings
+psutil
+pyttsx3
+pytest
+httpx
+ruaccent
+num2words
+razdel
+lameenc
+loguru
+tenacity

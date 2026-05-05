@@ -1,0 +1,6 @@
+# Optional profile for full neural TTS with GPU.
+# Recommended interpreter: Python 3.11 or 3.12.
+
+torch
+TTS
+transformers

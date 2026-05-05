@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Russian Book to Audio</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 760px; margin: 24px auto; padding: 0 12px; }
+    form { display: grid; gap: 10px; padding: 16px; border: 1px solid #ddd; border-radius: 8px; }
+    label { display: grid; gap: 6px; font-size: 14px; }
+    input, select, button { padding: 8px; font-size: 14px; }
+    button { cursor: pointer; }
+    .card { margin-top: 16px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; }
+    .mono { font-family: Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <h2>Конвертер книги в аудио</h2>
+  <p>Выберите файл книги в формате <span class="mono">.txt</span> и запустите обработку.</p>
+  <form id="job-form">
+    <label>
+      Файл книги
+      <input id="book-file" type="file" accept=".txt" required />
+    </label>
+    <label>
+      Спикер
+      <select id="speaker-id">
+        <option value="0">0 - женский</option>
+        <option value="1">1 - мужской</option>
+      </select>
+    </label>
+    <label>
+      Скорость
+      <input id="speed" type="number" min="0.5" max="2.0" step="0.1" value="1.0" />
+    </label>
+    <label>
+      Использовать GPU
+      <select id="use-gpu">
+        <option value="true">Да</option>
+        <option value="false">Нет</option>
+      </select>
+    </label>
+    <button type="submit">Запустить</button>
+  </form>
+
+  <div class="card">
+    <div>Job ID: <span id="job-id" class="mono">-</span></div>
+    <div>Статус: <span id="status">-</span></div>
+    <div>Прогресс: <span id="progress">0%</span></div>
+    <div>Движок: <span id="engine">-</span></div>
+    <div>Выходная директория: <span id="output-dir" class="mono">-</span></div>
+    <div>Ошибка: <span id="error">-</span></div>
+  </div>
+
+  <script>
+    const form = document.getElementById("job-form");
+    const fileInput = document.getElementById("book-file");
+    const statusEl = document.getElementById("status");
+    const progressEl = document.getElementById("progress");
+    const errorEl = document.getElementById("error");
+    const jobIdEl = document.getElementById("job-id");
+    const engineEl = document.getElementById("engine");
+    const outputDirEl = document.getElementById("output-dir");
+
+    let pollTimer = null;
+
+    async function pollStatus(jobId) {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`/jobs/${jobId}`);
+          if (!res.ok) return;
+          const data = await res.json();
+          statusEl.textContent = data.status || "-";
+          progressEl.textContent = `${Math.round((data.progress || 0) * 100)}%`;
+          engineEl.textContent = (data.meta && data.meta.engine) || "-";
+          outputDirEl.textContent = data.output_dir || "-";
+          errorEl.textContent = data.error || "-";
+          if (data.status === "done" || data.status === "failed") {
+            clearInterval(pollTimer);
+          }
+        } catch (err) {
+          errorEl.textContent = String(err);
+        }
+      }, 1000);
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const file = fileInput.files[0];
+      if (!file) {
+        alert("Выберите файл книги.");
+        return;
+      }
+
+      statusEl.textContent = "sending";
+      progressEl.textContent = "0%";
+      engineEl.textContent = "-";
+      outputDirEl.textContent = "-";
+      errorEl.textContent = "-";
+
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("speaker_id", document.getElementById("speaker-id").value || "0");
+      fd.append("speed", document.getElementById("speed").value || "1.0");
+      fd.append("use_gpu", document.getElementById("use-gpu").value);
+
+      try {
+        const res = await fetch("/jobs", { method: "POST", body: fd });
+        const payload = await res.json();
+        if (!res.ok) {
+          throw new Error(payload.detail || "Ошибка создания задачи");
+        }
+        const jobId = payload.job_id;
+        jobIdEl.textContent = jobId;
+        statusEl.textContent = "pending";
+        await pollStatus(jobId);
+      } catch (err) {
+        statusEl.textContent = "failed";
+        errorEl.textContent = String(err);
+      }
+    });
+  </script>
+</body>
+</html>
