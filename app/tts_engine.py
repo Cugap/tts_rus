@@ -20,8 +20,9 @@ except Exception:  # pragma: no cover
 
 class TTSEngine:
     def __init__(
-        self, voice: str = "default", speed: float = 1.0, use_gpu: bool = True
+        self, engine: str = "auto", voice: str = "default", speed: float = 1.0, use_gpu: bool = True
     ):
+        self.requested_engine = engine
         self.voice = voice
         self.speed = speed
         self.use_gpu = use_gpu
@@ -47,50 +48,64 @@ class TTSEngine:
         self.device = "cuda" if can_cuda else "cpu"
 
         # Check if XTTS Docker API is available
-        try:
-            response = httpx.get(
-                settings.xtts_api_url.replace("/tts_to_audio/", "/languages"),
-                timeout=2.0,
-            )
-            if response.status_code == 200:
-                logger.info("Connected to XTTS Docker API")
-                self._engine_mode = "xtts_api"
-                return
-        except Exception:
-            logger.debug("XTTS Docker API not available, falling back to local models")
+        if self.requested_engine in ("auto", "xtts_api"):
+            try:
+                with httpx.Client(trust_env=False, timeout=2.0) as client:
+                    response = client.get(
+                        settings.xtts_api_url.replace("/tts_to_audio/", "/languages")
+                    )
+                if response.status_code == 200:
+                    logger.info("Connected to XTTS Docker API")
+                    self._engine_mode = "xtts_api"
+                    return
+            except Exception:
+                if self.requested_engine == "xtts_api":
+                    raise RuntimeError("XTTS API requested but not available")
+                logger.debug("XTTS Docker API not available, falling back to local models")
 
         # Preferred local option: HF VITS model from project directory.
-        hf_model_dir = (
-            Path(__file__).resolve().parent.parent
-            / "tts_ru_free_hf_vits_high_multispeaker"
-        )
-        if hf_model_dir.exists():
-            try:
-                from transformers import AutoTokenizer, VitsModel  # type: ignore
+        if self.requested_engine in ("auto", "hf_vits_local"):
+            hf_model_dir = (
+                Path(__file__).resolve().parent.parent
+                / "tts_ru_free_hf_vits_high_multispeaker"
+            )
+            if hf_model_dir.exists():
+                try:
+                    from transformers import AutoTokenizer, VitsModel  # type: ignore
 
-                self._hf_model = VitsModel.from_pretrained(str(hf_model_dir)).to(
-                    self.device
-                )
-                self._hf_model.eval()
-                self._hf_tokenizer = AutoTokenizer.from_pretrained(str(hf_model_dir))
-                self._engine_mode = "hf_vits_local"
-                return
-            except Exception:
-                self._hf_model = None
-                self._hf_tokenizer = None
+                    self._hf_model = VitsModel.from_pretrained(str(hf_model_dir)).to(
+                        self.device
+                    )
+                    self._hf_model.eval()
+                    self._hf_tokenizer = AutoTokenizer.from_pretrained(str(hf_model_dir))
+                    self._engine_mode = "hf_vits_local"
+                    return
+                except Exception:
+                    self._hf_model = None
+                    self._hf_tokenizer = None
+                    if self.requested_engine == "hf_vits_local":
+                        raise RuntimeError("HF VITS requested but failed to load")
+            elif self.requested_engine == "hf_vits_local":
+                raise RuntimeError("HF VITS requested but model not found")
 
         # Primary option: Coqui TTS with CUDA/CPU.
-        try:
-            from TTS.api import TTS as CoquiTTS  # type: ignore
+        if self.requested_engine in ("auto", "coqui"):
+            try:
+                from TTS.api import TTS as CoquiTTS  # type: ignore
 
-            model_name = "tts_models/multilingual/multi-dataset/xtts_v2"
-            self._coqui = CoquiTTS(model_name=model_name, progress_bar=False).to(
-                self.device
-            )
-            self._engine_mode = "coqui"
-            return
-        except Exception:
-            self._coqui = None
+                model_name = "tts_models/multilingual/multi-dataset/xtts_v2"
+                self._coqui = CoquiTTS(model_name=model_name, progress_bar=False).to(
+                    self.device
+                )
+                self._engine_mode = "coqui"
+                return
+            except Exception:
+                self._coqui = None
+                if self.requested_engine == "coqui":
+                    raise RuntimeError("Coqui TTS requested but failed to load")
+
+        if self.requested_engine not in ("auto", "sapi"):
+            raise RuntimeError(f"Requested engine '{self.requested_engine}' is not available.")
 
         # Fallback option: Windows SAPI via PowerShell.
         self._engine_mode = "sapi"
@@ -163,17 +178,40 @@ class TTSEngine:
         wav_path.unlink(missing_ok=True)
 
     def _xtts_api_to_file(self, text: str, out_path: Path) -> None:
+        speaker_file = self._resolve_xtts_speaker_file()
         payload = {
             "text": text,
-            "speaker_wav": settings.xtts_speaker_wav,
+            "speaker_wav": speaker_file,
             "language": settings.xtts_language,
         }
         try:
-            response = httpx.post(settings.xtts_api_url, json=payload, timeout=120.0)
+            with httpx.Client(trust_env=False, timeout=120.0) as client:
+                response = client.post(settings.xtts_api_url, json=payload)
             response.raise_for_status()
             out_path.write_bytes(response.content)
         except Exception as e:
             raise RuntimeError(f"XTTS API synthesis failed: {e}")
+
+    def _resolve_xtts_speaker_file(self) -> str:
+        supported_ext = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
+        normalized_voice = (self.voice or "").strip()
+        if not normalized_voice:
+            return settings.xtts_speaker_wav
+
+        lower_voice = normalized_voice.lower()
+        if any(lower_voice.endswith(ext) for ext in supported_ext):
+            # XTTS can be unstable with some compressed samples; if a matching wav exists,
+            # prefer it automatically to reduce 500 errors from audio decode failures.
+            if not lower_voice.endswith(".wav"):
+                candidate_wav = Path("speakers") / (Path(normalized_voice).stem + ".wav")
+                if candidate_wav.exists():
+                    logger.warning(
+                        f"XTTS speaker '{normalized_voice}' redirected to '{candidate_wav.name}'"
+                    )
+                    return candidate_wav.name
+            return normalized_voice
+
+        return settings.xtts_speaker_wav
 
     def _sapi_to_file(self, text: str, out_path: Path) -> None:
         SAPI_MIN_RATE = -10

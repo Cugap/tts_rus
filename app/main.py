@@ -31,10 +31,37 @@ def index() -> FileResponse:
     return FileResponse(path=INDEX_HTML_PATH, media_type="text/html")
 
 
+@app.get("/engines")
+def get_engines() -> dict:
+    speakers_dir = Path("speakers")
+    xtts_speakers = []
+    if speakers_dir.exists():
+        for file in speakers_dir.iterdir():
+            if file.suffix.lower() in (".wav", ".mp3", ".flac", ".ogg", ".m4a"):
+                xtts_speakers.append({"id": file.name, "name": file.stem})
+    if not xtts_speakers:
+        xtts_speakers.append({"id": "default_speaker.wav", "name": "default_speaker"})
+
+    return {
+        "xtts_api": {
+            "name": "XTTS (Docker API)",
+            "speakers": xtts_speakers
+        },
+        "hf_vits_local": {
+            "name": "VITS (Локальная модель)",
+            "speakers": [
+                {"id": "0", "name": "Женский"},
+                {"id": "1", "name": "Мужской"}
+            ]
+        }
+    }
+
+
 @app.post("/jobs")
 async def create_job(
     file: UploadFile = File(...),
-    speaker_id: int = Form(default=0),
+    engine: str = Form(default="auto"),
+    speaker: str = Form(default="0"),
     speed: float = Form(default=1.0),
     use_gpu: bool = Form(default=True),
 ) -> dict:
@@ -51,7 +78,7 @@ async def create_job(
 
     logger.info(f"Received file {file.filename}, submitting job...")
     job_id = runner.submit(
-        source_path=upload_path, voice=str(speaker_id), speed=speed, use_gpu=use_gpu
+        source_path=upload_path, engine=engine, voice=speaker, speed=speed, use_gpu=use_gpu
     )
     return {"job_id": job_id}
 

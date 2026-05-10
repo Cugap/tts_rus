@@ -23,10 +23,15 @@
       <input id="book-file" type="file" accept=".txt" required />
     </label>
     <label>
+      Движок
+      <select id="engine-id">
+        <option value="auto">Автоматически</option>
+      </select>
+    </label>
+    <label>
       Спикер
       <select id="speaker-id">
-        <option value="0">0 - женский</option>
-        <option value="1">1 - мужской</option>
+        <option value="0">Загрузка...</option>
       </select>
     </label>
     <label>
@@ -63,6 +68,55 @@
     const outputDirEl = document.getElementById("output-dir");
 
     let pollTimer = null;
+    let enginesData = {};
+
+    async function loadEngines() {
+      try {
+        const res = await fetch("/engines");
+        if (!res.ok) return;
+        enginesData = await res.json();
+        
+        const engineSelect = document.getElementById("engine-id");
+        engineSelect.innerHTML = '<option value="auto">Автоматически</option>';
+        for (const [key, data] of Object.entries(enginesData)) {
+          const opt = document.createElement("option");
+          opt.value = key;
+          opt.textContent = data.name;
+          engineSelect.appendChild(opt);
+        }
+        
+        updateSpeakers();
+      } catch (err) {
+        console.error("Failed to load engines", err);
+      }
+    }
+
+    function updateSpeakers() {
+      const engineSelect = document.getElementById("engine-id");
+      const speakerSelect = document.getElementById("speaker-id");
+      const selectedEngine = engineSelect.value;
+      
+      speakerSelect.innerHTML = "";
+      
+      if (selectedEngine === "auto") {
+        const opt = document.createElement("option");
+        opt.value = "0";
+        opt.textContent = "По умолчанию";
+        speakerSelect.appendChild(opt);
+        return;
+      }
+      
+      const speakers = enginesData[selectedEngine]?.speakers || [];
+      speakers.forEach(s => {
+        const opt = document.createElement("option");
+        opt.value = s.id;
+        opt.textContent = s.name;
+        speakerSelect.appendChild(opt);
+      });
+    }
+
+    document.getElementById("engine-id").addEventListener("change", updateSpeakers);
+    loadEngines();
 
     async function pollStatus(jobId) {
       if (pollTimer) clearInterval(pollTimer);
@@ -101,7 +155,8 @@
 
       const fd = new FormData();
       fd.append("file", file);
-      fd.append("speaker_id", document.getElementById("speaker-id").value || "0");
+      fd.append("engine", document.getElementById("engine-id").value || "auto");
+      fd.append("speaker", document.getElementById("speaker-id").value || "0");
       fd.append("speed", document.getElementById("speed").value || "1.0");
       fd.append("use_gpu", document.getElementById("use-gpu").value);
 

@@ -18,6 +18,7 @@ class JobPayload(BaseModel):
     job_id: str
     source_path: Path
     output_dir: Path
+    engine: str
     voice: str
     speed: float
     use_gpu: bool

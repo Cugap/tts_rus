@@ -32,7 +32,7 @@ class JobRunner:
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
-    def submit(self, source_path: Path, voice: str, speed: float, use_gpu: bool) -> str:
+    def submit(self, source_path: Path, engine: str, voice: str, speed: float, use_gpu: bool) -> str:
         job_id = str(uuid.uuid4())
         output_dir = self._allocate_output_dir(source_path.stem)
 
@@ -49,6 +49,7 @@ class JobRunner:
             job_id=job_id,
             source_path=source_path,
             output_dir=output_dir,
+            engine=engine,
             voice=voice,
             speed=speed,
             use_gpu=use_gpu,
@@ -84,6 +85,7 @@ class JobRunner:
         job_id = payload.job_id
         source_path = payload.source_path
         output_dir = payload.output_dir
+        engine_name = payload.engine
         voice = payload.voice
         speed = payload.speed
         use_gpu = payload.use_gpu
@@ -96,7 +98,7 @@ class JobRunner:
         if not chapters:
             raise ValueError("Book text is empty after parsing.")
 
-        engine = TTSEngine(voice=voice, speed=speed, use_gpu=use_gpu)
+        engine = TTSEngine(engine=engine_name, voice=voice, speed=speed, use_gpu=use_gpu)
         plan: list[tuple[int, int, str]] = []
         chapter_chunks: dict[int, list[str]] = {}
 

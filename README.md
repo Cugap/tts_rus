@@ -35,20 +35,41 @@ pip install -r requirements.txt
 pip install -r requirements-gpu-py311.txt
 ```
 
-### 2. Запуск сервера XTTS (Рекомендуется для лучшего качества)
+### 2. Подготовка приложения и скачивание локальной модели
+
+Запустите скрипт настройки, который автоматически создаст нужные папки и скачает локальную VITS-модель (`utrobinmv/tts_ru_free_hf_vits_high_multispeaker`) с Hugging Face:
+
+```bash
+python setup.py
+```
+
+### 3. Запуск сервера XTTS (Рекомендуется для лучшего качества)
 
 Для наилучшего качества озвучки рекомендуется использовать XTTS v2 через Docker.
-1. Создайте папку `speakers` в корне проекта.
+1. Убедитесь, что после запуска `setup.py` у вас появилась папка `speakers` в корне проекта.
 2. Положите туда файл `default_speaker.wav` (5-10 секунд записи голоса, которым хотите озвучивать).
 3. Запустите Docker-контейнер:
 
-```bash
-docker run --gpus=all -e CUDA_VISIBLE_DEVICES=0 -p 8020:8020 -v D:\repos\tts_rus\speakers:/app/speakers -v xtts_models:/app/models daswer123/xtts-api-server:latest
-```
+> **Важно: Сборка кастомного Docker-образа (рекомендуется)**
+> Оригинальный образ `daswer123/xtts-api-server:latest` устарел (выдает предупреждение "THIS IMAGE IS DEPRECATED and is scheduled for DELETION") и содержит старую версию PyTorch, которая не поддерживает новейшие видеокарты (например, RTX 5070 Ti с архитектурой `sm_120`).
+> 
+> В репозитории есть `Dockerfile.xtts`, который собирает сервер с нуля с самой свежей версией PyTorch (CUDA 12.8) и полностью обходит проблему устаревшего образа.
+> 
+> ```bash
+> # 1. Соберите локальный образ (займет пару минут)
+> docker build -t xtts-api-server-custom -f Dockerfile.xtts .
+> 
+> # 2. Запускайте сервер, используя этот новый образ
+> # Для PowerShell (Windows) или Linux/macOS:
+> docker run --gpus=all -e CUDA_VISIBLE_DEVICES=0 -p 8020:8020 -v "${PWD}/speakers:/app/speakers" -v xtts_models:/app/models xtts-api-server-custom
+> 
+> # Для командной строки (CMD) в Windows:
+> # docker run --gpus=all -e CUDA_VISIBLE_DEVICES=0 -p 8020:8020 -v "%cd%\speakers:/app/speakers" -v xtts_models:/app/models xtts-api-server-custom
+> ```
 
 *Приложение автоматически найдет запущенный контейнер на порту 8020 и будет использовать его.*
 
-### 3. Запуск приложения
+### 4. Запуск приложения
 
 ```bash
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
