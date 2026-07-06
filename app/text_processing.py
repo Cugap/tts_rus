@@ -140,7 +140,6 @@ FB2_MAX_REPLACEMENT_CHAR_RATIO = 0.02
 FB2_TEXT_BLOCK_TAGS = frozenset(
     {"p", "v", "subtitle", "text-author", "cite", "date"}
 )
-FB2_CONTAINER_TAGS = frozenset({"poem", "stanza", "epigraph", "section", "title"})
 MAX_CHAPTER_TITLE_LENGTH = 60
 
 # Additional validation thresholds
@@ -364,11 +363,10 @@ def _fb2_analyze(document: Fb2Document) -> _Fb2Analysis:
                 analysis.tables += 1
             elif local == "binary":
                 analysis.binaries += 1
-            elif local == "section":
-                analysis.sections += 1
 
     for body in main_bodies:
         sections = body.findall(f"./{document.tag('section')}")
+        analysis.sections += len(sections)
         if sections:
             for section in sections:
                 text = _fb2_section_text(section)

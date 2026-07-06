@@ -35,6 +35,10 @@ venv.bak/
 .env.*
 !.env.example
 
+# Debug scripts
+_debug_*.py
+debug_scripts/
+
 # IDE / Editor
 .vscode/
 .idea/

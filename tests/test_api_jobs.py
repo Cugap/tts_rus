@@ -12,8 +12,9 @@ from app.storage import init_db
 
 class FakeTTSEngine:
     def __init__(
-        self, voice: str = "default", speed: float = 1.0, use_gpu: bool = True
+        self, engine: str = "auto", voice: str = "default", speed: float = 1.0, use_gpu: bool = True
     ):
+        self.requested_engine = engine
         self.voice = voice
         self.speed = speed
         self.use_gpu = use_gpu
@@ -31,10 +32,9 @@ def test_api_create_job_and_get_status(tmp_path, monkeypatch) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "uploads").mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr("app.storage.DB_PATH", db_path)
+    monkeypatch.setattr(main.settings, "db_path", db_path)
+    monkeypatch.setattr(main.settings, "output_dir", output_dir)
     monkeypatch.setattr(job_runner, "TTSEngine", FakeTTSEngine)
-    monkeypatch.setattr(job_runner, "OUTPUT_DIR", output_dir)
-    monkeypatch.setattr(main, "OUTPUT_DIR", output_dir)
     monkeypatch.setattr(text_processing, "get_accentizer", lambda: False)
 
     init_db()
@@ -81,6 +81,6 @@ def test_api_create_job_and_get_status(tmp_path, monkeypatch) -> None:
         chapter = item["chapter"]
         part = item["part"]
         filename = item["file"]
-        assert filename == f"chapter_{chapter:03d}_part_{part:03d}.wav"
+        assert filename == f"chapter_{chapter:03d}_part_{part:03d}.mp3"
         generated = out_job_dir / filename
         assert generated.exists()

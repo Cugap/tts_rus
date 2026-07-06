@@ -23,8 +23,3 @@ class Settings(BaseSettings):
 
 settings = Settings()
 settings.output_dir.mkdir(parents=True, exist_ok=True)
-
-# Backward compatibility aliases
-BASE_DIR = settings.base_dir
-OUTPUT_DIR = settings.output_dir
-DB_PATH = settings.db_path

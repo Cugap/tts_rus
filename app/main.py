@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -11,6 +12,9 @@ from app.job_runner import JobRunner
 from app.storage import get_job, init_db, list_jobs
 from app.text_processing import SUPPORTED_BOOK_EXTENSIONS, Fb2ValidationResult, validate_fb2
 
+MAX_UPLOAD_SIZE_MB = 200
+MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
 
 def _fb2_validation_http_detail(result: Fb2ValidationResult) -> dict:
     return {
@@ -20,19 +24,20 @@ def _fb2_validation_http_detail(result: Fb2ValidationResult) -> dict:
     }
 
 
-app = FastAPI(title="Russian Book to Audio")
-runner = JobRunner()
-TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
-INDEX_HTML_PATH = TEMPLATES_DIR / "index.html"
-
-
-@app.on_event("startup")
-def startup() -> None:
+@asynccontextmanager
+async def lifespan(application: FastAPI):
     logger.info("Initializing database and directories...")
     init_db()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     (settings.output_dir / "uploads").mkdir(parents=True, exist_ok=True)
     logger.info("Application startup complete.")
+    yield
+
+
+app = FastAPI(title="Russian Book to Audio", lifespan=lifespan)
+runner = JobRunner()
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+INDEX_HTML_PATH = TEMPLATES_DIR / "index.html"
 
 
 @app.get("/", response_class=FileResponse)
@@ -57,6 +62,18 @@ def get_engines() -> dict:
     }
 
 
+async def _check_file_size(file: UploadFile) -> bytes:
+    ONE_MB = 1024 * 1024
+    MAX_READ = MAX_UPLOAD_SIZE_BYTES + ONE_MB
+    raw = await file.read(MAX_READ)
+    if len(raw) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Файл слишком большой: {len(raw) / ONE_MB:.1f} МБ (максимум {MAX_UPLOAD_SIZE_MB} МБ).",
+        )
+    return raw
+
+
 @app.post("/books/validate")
 async def validate_book(file: UploadFile = File(...)) -> dict:
     if not file.filename:
@@ -66,7 +83,7 @@ async def validate_book(file: UploadFile = File(...)) -> dict:
     if ext != ".fb2":
         raise HTTPException(status_code=400, detail="Validation is supported only for .fb2 files.")
 
-    raw = await file.read()
+    raw = await _check_file_size(file)
     result = validate_fb2(raw)
     return {
         "ok": result.ok,
@@ -92,7 +109,7 @@ async def create_job(
         raise HTTPException(status_code=400, detail=f"Supported formats: {supported}.")
 
     upload_path = settings.output_dir / "uploads" / file.filename
-    raw = await file.read()
+    raw = await _check_file_size(file)
 
     if ext == ".fb2":
         validation = validate_fb2(raw)

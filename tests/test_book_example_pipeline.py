@@ -4,14 +4,15 @@ import json
 from pathlib import Path
 
 from app import job_runner, text_processing
-from app.models import JobStatus
+from app.models import JobPayload, JobStatus
 from app.storage import get_job, init_db, insert_job
 
 
 class FakeTTSEngine:
     def __init__(
-        self, voice: str = "default", speed: float = 1.0, use_gpu: bool = True
+        self, engine: str = "auto", voice: str = "default", speed: float = 1.0, use_gpu: bool = True
     ):
+        self.requested_engine = engine
         self.voice = voice
         self.speed = speed
         self.use_gpu = use_gpu
@@ -37,9 +38,13 @@ def test_book_example_pipeline_creates_chapter_parts(tmp_path, monkeypatch) -> N
     output_dir = tmp_path / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr("app.storage.DB_PATH", db_path)
     monkeypatch.setattr(job_runner, "TTSEngine", FakeTTSEngine)
     monkeypatch.setattr(text_processing, "get_accentizer", lambda: False)
+
+    # Override settings before init_db
+    import app.config as app_config
+    app_config.settings.db_path = db_path
+    app_config.settings.output_dir = output_dir
 
     init_db()
     runner = job_runner.JobRunner()
@@ -53,14 +58,15 @@ def test_book_example_pipeline_creates_chapter_parts(tmp_path, monkeypatch) -> N
         use_gpu=False,
     )
 
-    payload = {
-        "job_id": job_id,
-        "source_path": source_path,
-        "output_dir": output_dir,
-        "voice": "default",
-        "speed": 1.0,
-        "use_gpu": False,
-    }
+    payload = JobPayload(
+        job_id=job_id,
+        source_path=source_path,
+        output_dir=output_dir,
+        engine="auto",
+        voice="default",
+        speed=1.0,
+        use_gpu=False,
+    )
     runner._process_job(payload)
 
     job = get_job(job_id)
@@ -79,7 +85,7 @@ def test_book_example_pipeline_creates_chapter_parts(tmp_path, monkeypatch) -> N
         chapter = file_item["chapter"]
         part = file_item["part"]
         file_name = file_item["file"]
-        assert file_name == f"chapter_{chapter:03d}_part_{part:03d}.wav"
+        assert file_name == f"chapter_{chapter:03d}_part_{part:03d}.mp3"
         generated = output_dir / file_name
         assert generated.exists()
         assert generated.read_bytes().startswith(b"FAKE_WAV:")

@@ -94,7 +94,7 @@ def test_validate_fb2_rejects_too_short(tmp_path: Path) -> None:
     result = validate_fb2(short)
 
     assert result.ok is False
-    assert any(issue.code in {"too_short", "short_chapters"} for issue in result.issues)
+    assert any(issue.code == "too_short" for issue in result.issues)
 
 
 def test_validate_fb2_warns_low_cyrillic_ratio(tmp_path: Path) -> None:

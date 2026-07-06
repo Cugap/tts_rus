@@ -59,7 +59,7 @@ class JobRunner:
 
     @staticmethod
     def _allocate_output_dir(base_name: str) -> Path:
-        INITIAL_DIR_SUFFIX = 2
+        INITIAL_DIR_SUFFIX = 1
         safe_name = base_name.strip() or "book"
         candidate = settings.output_dir / safe_name
         suffix = INITIAL_DIR_SUFFIX
@@ -77,6 +77,10 @@ class JobRunner:
             except Exception as err:  # pragma: no cover
                 logger.exception(f"Job {payload.job_id} failed with error: {err}")
                 update_job(payload.job_id, status=JobStatus.FAILED, error=str(err))
+                # Clean up partial output on failure
+                if payload.output_dir.exists():
+                    import shutil
+                    shutil.rmtree(payload.output_dir, ignore_errors=True)
             finally:
                 self._queue.task_done()
 
@@ -98,13 +102,11 @@ class JobRunner:
 
         engine = TTSEngine(engine=engine_name, voice=voice, speed=speed, use_gpu=use_gpu)
         plan: list[tuple[int, int, str]] = []
-        chapter_chunks: dict[int, list[str]] = {}
 
         for chapter in chapters:
             chunks = split_text_safely(
                 chapter.text, max_chars=settings.max_chars_per_chunk
             )
-            chapter_chunks[chapter.number] = chunks
             for part_idx, chunk in enumerate(chunks, start=1):
                 plan.append((chapter.number, part_idx, chunk))
 
@@ -162,11 +164,12 @@ class JobRunner:
                     "file": filename,
                 }
             )
-            (output_dir / "manifest.json").write_text(
-                json.dumps(manifest, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
             update_job(job_id, progress=progress, meta=manifest)
 
+        # Write manifest once at the end
+        (output_dir / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         logger.info(f"Job {job_id} completed successfully.")
         update_job(job_id, status=JobStatus.DONE, progress=1.0, meta=manifest, error="")

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
 import subprocess
 import tempfile
 import wave
 from pathlib import Path
 
 import psutil
+
+from app.config import settings
 
 try:
     import torch
@@ -102,19 +105,16 @@ class TTSEngine:
     def _convert_wav_to_mp3(self, wav_path: Path, mp3_path: Path) -> None:
         import lameenc
 
-        MP3_BITRATE_KBPS = 128
-        MP3_QUALITY_NORMAL = 2
-
         with wave.open(str(wav_path), "rb") as wav:
             sample_rate = wav.getframerate()
             channels = wav.getnchannels()
             pcm_data = wav.readframes(wav.getnframes())
 
         encoder = lameenc.Encoder()
-        encoder.set_bit_rate(MP3_BITRATE_KBPS)
+        encoder.set_bit_rate(settings.mp3_bitrate_kbps)
         encoder.set_in_sample_rate(sample_rate)
         encoder.set_channels(channels)
-        encoder.set_quality(MP3_QUALITY_NORMAL)
+        encoder.set_quality(settings.mp3_quality_normal)
 
         mp3_data = encoder.encode(pcm_data)
         mp3_data += encoder.flush()
@@ -127,27 +127,21 @@ class TTSEngine:
         SAPI_MAX_RATE = 10
         SAPI_RATE_MULTIPLIER = 10
 
-        path_ps = str(out_path).replace("'", "''")
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".txt", delete=False, encoding="utf-8"
-        ) as tmp:
-            tmp.write(text)
-            text_path = tmp.name
-        text_path_ps = text_path.replace("'", "''")
-
         rate = max(
             SAPI_MIN_RATE,
             min(SAPI_MAX_RATE, int((self.speed - 1.0) * SAPI_RATE_MULTIPLIER)),
         )
+        # Base64-encode the text to avoid PowerShell escaping issues
+        text_b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
         script = (
             "Add-Type -AssemblyName System.Speech; "
             "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-            f"$text = Get-Content -LiteralPath '{text_path_ps}' -Raw -Encoding UTF8; "
+            f"$bytes = [Convert]::FromBase64String('{text_b64}'); "
+            "$text = [System.Text.Encoding]::UTF8.GetString($bytes); "
             f"$s.Rate = {rate}; "
-            f"$s.SetOutputToWaveFile('{path_ps}'); "
+            f"$s.SetOutputToWaveFile('{out_path}'); "
             "$s.Speak($text); "
-            "$s.Dispose(); "
-            f"Remove-Item -LiteralPath '{text_path_ps}' -Force;"
+            "$s.Dispose();"
         )
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command", script],
@@ -169,8 +163,7 @@ class TTSEngine:
         assert torch is not None
 
         speaker = self._parse_speaker_id(self.voice)
-        normalized_text = text.lower()
-        inputs = self._hf_tokenizer(normalized_text, return_tensors="pt")
+        inputs = self._hf_tokenizer(text, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         with torch.no_grad():
