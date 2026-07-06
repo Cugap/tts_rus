@@ -12,15 +12,17 @@
     button { cursor: pointer; }
     .card { margin-top: 16px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; }
     .mono { font-family: Consolas, monospace; }
+    .error-list { margin: 8px 0 0; padding-left: 20px; color: #a40000; }
+    .hint { color: #555; font-size: 13px; }
   </style>
 </head>
 <body>
   <h2>Конвертер книги в аудио</h2>
-  <p>Выберите файл книги в формате <span class="mono">.txt</span> и запустите обработку.</p>
+  <p>Выберите файл книги в формате <span class="mono">.txt</span> или <span class="mono">.fb2</span> и запустите обработку.</p>
   <form id="job-form">
     <label>
       Файл книги
-      <input id="book-file" type="file" accept=".txt" required />
+      <input id="book-file" type="file" accept=".txt,.fb2" required />
     </label>
     <label>
       Движок
@@ -54,7 +56,10 @@
     <div>Прогресс: <span id="progress">0%</span></div>
     <div>Движок: <span id="engine">-</span></div>
     <div>Выходная директория: <span id="output-dir" class="mono">-</span></div>
+    <div id="validation-block" class="hint" hidden></div>
+    <div id="validation-stats" hidden></div>
     <div>Ошибка: <span id="error">-</span></div>
+    <ul id="error-list" class="error-list" hidden></ul>
   </div>
 
   <script>
@@ -63,9 +68,12 @@
     const statusEl = document.getElementById("status");
     const progressEl = document.getElementById("progress");
     const errorEl = document.getElementById("error");
+    const errorListEl = document.getElementById("error-list");
+    const validationBlockEl = document.getElementById("validation-block");
     const jobIdEl = document.getElementById("job-id");
     const engineEl = document.getElementById("engine");
     const outputDirEl = document.getElementById("output-dir");
+    const validationStatsEl = document.getElementById("validation-stats");
 
     let pollTimer = null;
     let enginesData = {};
@@ -115,6 +123,114 @@
       });
     }
 
+    function clearErrors() {
+      errorEl.textContent = "-";
+      errorListEl.hidden = true;
+      errorListEl.innerHTML = "";
+      validationBlockEl.hidden = true;
+      validationBlockEl.textContent = "";
+      if (validationStatsEl) {
+        validationStatsEl.hidden = true;
+        validationStatsEl.innerHTML = "";
+      }
+    }
+
+    function formatStat(label, value) {
+      if (value === null || value === undefined) return "";
+      if (typeof value === "number" && value > 999) return value.toLocaleString("ru-RU");
+      return String(value);
+    }
+
+    function renderValidationStats(stats) {
+      if (!validationStatsEl || !stats || !stats.total_chars) {
+        if (validationStatsEl) validationStatsEl.hidden = true;
+        return;
+      }
+      const rows = [
+        ["Символов", stats.total_chars],
+        ["Букв", stats.letter_chars],
+        ["Абзацев", stats.paragraphs],
+        ["Глав с текстом", stats.chapters_with_text],
+        ["Секций", stats.sections],
+        ["Пустых секций", stats.empty_sections],
+        ["Изображений", stats.images],
+        ["Таблиц", stats.tables],
+        ["Макс. длина абзаца", stats.max_paragraph_len],
+      ].filter(r => r[1] !== undefined && r[1] !== null && Number(r[1]) > 0);
+
+      let html = "<table style='font-size:12px;margin-top:6px;border-collapse:collapse;width:100%'>";
+      for (const [label, value] of rows) {
+        html += `<tr><td style='padding:2px 8px;color:#555'>${label}</td><td style='padding:2px 8px;font-weight:bold'>${formatStat(label, value)}</td></tr>`;
+      }
+      html += "</table>";
+      validationStatsEl.innerHTML = html;
+      validationStatsEl.hidden = false;
+    }
+
+    function showApiError(detail) {
+      clearErrors();
+      if (typeof detail === "object" && detail !== null && Array.isArray(detail.issues)) {
+        errorEl.textContent = detail.message || "Ошибка проверки файла";
+        errorListEl.hidden = false;
+        detail.issues.forEach((issue) => {
+          const item = document.createElement("li");
+          item.textContent = issue.message;
+          errorListEl.appendChild(item);
+        });
+        if (detail.stats) renderValidationStats(detail.stats);
+        return;
+      }
+      if (typeof detail === "string") {
+        errorEl.textContent = detail;
+        return;
+      }
+      errorEl.textContent = JSON.stringify(detail);
+    }
+
+    async function validateSelectedFile(file) {
+      if (!file || !file.name.toLowerCase().endsWith(".fb2")) {
+        clearErrors();
+        return true;
+      }
+
+      validationBlockEl.hidden = false;
+      validationBlockEl.textContent = "Проверка FB2...";
+
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/books/validate", { method: "POST", body: fd });
+      const payload = await res.json();
+      if (!res.ok) {
+        showApiError(payload.detail || payload);
+        validationBlockEl.textContent = "FB2 не прошёл проверку.";
+        return false;
+      }
+      if (!payload.ok) {
+        showApiError(payload);
+        validationBlockEl.textContent = "FB2 не прошёл проверку.";
+        return false;
+      }
+
+      clearErrors();
+      validationBlockEl.hidden = false;
+      validationBlockEl.textContent = "FB2 прошёл проверку и готов к озвучке.";
+      if (payload.stats) renderValidationStats(payload.stats);
+      return true;
+    }
+
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files[0];
+      if (!file) {
+        clearErrors();
+        return;
+      }
+      try {
+        await validateSelectedFile(file);
+      } catch (err) {
+        showApiError(String(err));
+      }
+    });
+
     document.getElementById("engine-id").addEventListener("change", updateSpeakers);
     loadEngines();
 
@@ -151,7 +267,19 @@
       progressEl.textContent = "0%";
       engineEl.textContent = "-";
       outputDirEl.textContent = "-";
-      errorEl.textContent = "-";
+      clearErrors();
+
+      try {
+        const isValid = await validateSelectedFile(file);
+        if (!isValid) {
+          statusEl.textContent = "failed";
+          return;
+        }
+      } catch (err) {
+        statusEl.textContent = "failed";
+        showApiError(String(err));
+        return;
+      }
 
       const fd = new FormData();
       fd.append("file", file);
@@ -164,7 +292,9 @@
         const res = await fetch("/jobs", { method: "POST", body: fd });
         const payload = await res.json();
         if (!res.ok) {
-          throw new Error(payload.detail || "Ошибка создания задачи");
+          showApiError(payload.detail || payload);
+          statusEl.textContent = "failed";
+          return;
         }
         const jobId = payload.job_id;
         jobIdEl.textContent = jobId;
@@ -172,7 +302,7 @@
         await pollStatus(jobId);
       } catch (err) {
         statusEl.textContent = "failed";
-        errorEl.textContent = String(err);
+        showApiError(String(err));
       }
     });
   </script>

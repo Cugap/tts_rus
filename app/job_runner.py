@@ -18,8 +18,7 @@ from app.config import settings
 from app.models import JobStatus, JobPayload
 from app.storage import insert_job, update_job
 from app.text_processing import (
-    load_text_file,
-    split_into_chapters,
+    load_chapters,
     split_text_safely,
     normalize_text,
 )
@@ -93,8 +92,7 @@ class JobRunner:
         logger.info(f"Starting job {job_id} for {source_path}")
         update_job(job_id, status=JobStatus.RUNNING, progress=0.0, error="")
 
-        text = load_text_file(source_path)
-        chapters = split_into_chapters(text)
+        chapters = load_chapters(source_path)
         if not chapters:
             raise ValueError("Book text is empty after parsing.")
 

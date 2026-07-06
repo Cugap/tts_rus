@@ -67,6 +67,7 @@ speakers/*
 book_example/*
 !book_example/smoke_short.txt
 !book_example/norm_test.txt
+!book_example/sample.fb2
 !book_example/README.md
 
 # OS generated files

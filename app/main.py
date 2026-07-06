@@ -9,6 +9,15 @@ from loguru import logger
 from app.config import settings
 from app.job_runner import JobRunner
 from app.storage import get_job, init_db, list_jobs
+from app.text_processing import SUPPORTED_BOOK_EXTENSIONS, Fb2ValidationResult, validate_fb2
+
+
+def _fb2_validation_http_detail(result: Fb2ValidationResult) -> dict:
+    return {
+        "message": "FB2 не подходит для озвучки",
+        "issues": [{"code": issue.code, "message": issue.message} for issue in result.issues],
+        "stats": result.stats,
+    }
 
 
 app = FastAPI(title="Russian Book to Audio")
@@ -33,27 +42,36 @@ def index() -> FileResponse:
 
 @app.get("/engines")
 def get_engines() -> dict:
-    speakers_dir = Path("speakers")
-    xtts_speakers = []
-    if speakers_dir.exists():
-        for file in speakers_dir.iterdir():
-            if file.suffix.lower() in (".wav", ".mp3", ".flac", ".ogg", ".m4a"):
-                xtts_speakers.append({"id": file.name, "name": file.stem})
-    if not xtts_speakers:
-        xtts_speakers.append({"id": "default_speaker.wav", "name": "default_speaker"})
-
     return {
-        "xtts_api": {
-            "name": "XTTS (Docker API)",
-            "speakers": xtts_speakers
-        },
         "hf_vits_local": {
             "name": "VITS (Локальная модель)",
             "speakers": [
                 {"id": "0", "name": "Женский"},
-                {"id": "1", "name": "Мужской"}
-            ]
-        }
+                {"id": "1", "name": "Мужской"},
+            ],
+        },
+        "sapi": {
+            "name": "Windows SAPI",
+            "speakers": [{"id": "default", "name": "Системный голос"}],
+        },
+    }
+
+
+@app.post("/books/validate")
+async def validate_book(file: UploadFile = File(...)) -> dict:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required.")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext != ".fb2":
+        raise HTTPException(status_code=400, detail="Validation is supported only for .fb2 files.")
+
+    raw = await file.read()
+    result = validate_fb2(raw)
+    return {
+        "ok": result.ok,
+        "issues": [{"code": issue.code, "message": issue.message} for issue in result.issues],
+        "stats": result.stats,
     }
 
 
@@ -69,11 +87,21 @@ async def create_job(
         raise HTTPException(status_code=400, detail="Filename is required.")
 
     ext = Path(file.filename).suffix.lower()
-    if ext not in {".txt"}:
-        raise HTTPException(status_code=400, detail="Only .txt is supported in MVP.")
+    if ext not in SUPPORTED_BOOK_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_BOOK_EXTENSIONS))
+        raise HTTPException(status_code=400, detail=f"Supported formats: {supported}.")
 
     upload_path = settings.output_dir / "uploads" / file.filename
     raw = await file.read()
+
+    if ext == ".fb2":
+        validation = validate_fb2(raw)
+        if not validation.ok:
+            raise HTTPException(
+                status_code=400,
+                detail=_fb2_validation_http_detail(validation),
+            )
+
     upload_path.write_bytes(raw)
 
     logger.info(f"Received file {file.filename}, submitting job...")

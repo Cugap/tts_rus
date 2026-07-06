@@ -32,10 +32,7 @@ def main():
     output_dir = Path(__file__).resolve().parent / "output"
     output_dir.mkdir(exist_ok=True)
     (output_dir / "uploads").mkdir(exist_ok=True)
-    
-    speakers_dir = Path(__file__).resolve().parent / "speakers"
-    speakers_dir.mkdir(exist_ok=True)
-    
+
     print("\nПодготовка завершена! Теперь вы можете запустить сервер командой:")
     print("python -m uvicorn app.main:app --host 127.0.0.1 --port 8000")
 

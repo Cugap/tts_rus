@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description>
+    <title-info>
+      <book-title>Тестовая книга</book-title>
+      <author>
+        <first-name>Тест</first-name>
+        <last-name>Автор</last-name>
+      </author>
+    </title-info>
+  </description>
+  <body>
+    <section>
+      <title><p>Глава 1</p></title>
+      <p>Это первая глава. Тут немного текста для синтеза.</p>
+      <empty-line/>
+      <p>Вторая строка первой главы.</p>
+    </section>
+    <section>
+      <title><p>Глава 2</p></title>
+      <p>Это вторая глава. Еще немного текста.</p>
+    </section>
+  </body>
+</FictionBook>

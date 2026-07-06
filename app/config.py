@@ -16,11 +16,6 @@ class Settings(BaseSettings):
     mp3_bitrate_kbps: int = 128
     mp3_quality_normal: int = 2
 
-    # XTTS Docker API Settings
-    xtts_api_url: str = "http://localhost:8020/tts_to_audio/"
-    xtts_speaker_wav: str = "default_speaker.wav"
-    xtts_language: str = "ru"
-
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
