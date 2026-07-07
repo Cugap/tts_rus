@@ -320,8 +320,23 @@ class TTSEngine:
             wav_file.setframerate(int(self._hf_model.config.sampling_rate))
             wav_file.writeframes(pcm16)
 
+    @staticmethod
+    def _truncate_xtts_text(text: str, max_chars: int = 180) -> str:
+        """Truncate text to fit XTTS character limit, breaking at last space."""
+        if len(text) <= max_chars:
+            return text
+        logger.warning(f"XTTS текст превышает лимит ({len(text)} > {max_chars}): усекаем")
+        truncated = text[:max_chars]
+        # Откатываемся до последнего пробела, чтобы не разрывать слово
+        last_space = truncated.rfind(" ")
+        if last_space > max_chars // 2:
+            truncated = truncated[:last_space]
+        return truncated
+
     def _xtts_to_file(self, text: str, out_path: Path) -> None:
         assert self._xtts_model is not None
+
+        text = self._truncate_xtts_text(text)
 
         _err_output: str = ""
 
@@ -339,7 +354,7 @@ class TTSEngine:
                 return
             except Exception as _inproc_err:
                 _err_output = str(_inproc_err)
-                logger.error(f"XTTS in-process синтез не удался: {_inproc_err}")
+                logger.warning(f"XTTS in-process ошибка: {_inproc_err}")
 
         # Subprocess fallback
         logger.debug(f"XTTS subprocess синтез: {len(text)} символов")
@@ -358,7 +373,7 @@ class TTSEngine:
         )
         if result.returncode != 0:
             _msg = result.stderr.strip() or result.stdout.strip() or _err_output
-            logger.error(f"XTTS subprocess ошибка (rc={result.returncode}): {_msg[:500]}")
+            logger.warning(f"XTTS subprocess ошибка (rc={result.returncode}): {_msg[:500]}")
             if "libtorchcodec" in _msg or "FFmpeg" in _msg:
                 raise RuntimeError(
                     "XTTS требует FFmpeg на Windows. Установите FFmpeg (full-shared) "

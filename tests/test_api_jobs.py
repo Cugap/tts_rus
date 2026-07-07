@@ -81,8 +81,12 @@ def test_api_create_job_and_get_status(tmp_path, monkeypatch) -> None:
     for item in manifest["files"]:
         chapter = item["chapter"]
         part = item["part"]
+        sub_part = item.get("sub_part", 0)
         filename = item["file"]
-        assert filename == f"chapter_{chapter:03d}_part_{part:03d}.mp3"
+        if sub_part:
+            assert filename == f"chapter_{chapter:03d}_part_{part:03d}_{sub_part:03d}.mp3"
+        else:
+            assert filename == f"chapter_{chapter:03d}_part_{part:03d}.mp3"
         generated = out_job_dir / filename
         assert generated.exists()
 

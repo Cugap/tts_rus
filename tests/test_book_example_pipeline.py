@@ -84,8 +84,12 @@ def test_book_example_pipeline_creates_chapter_parts(tmp_path, monkeypatch) -> N
     for file_item in manifest["files"]:
         chapter = file_item["chapter"]
         part = file_item["part"]
+        sub_part = file_item.get("sub_part", 0)
         file_name = file_item["file"]
-        assert file_name == f"chapter_{chapter:03d}_part_{part:03d}.mp3"
+        if sub_part:
+            assert file_name == f"chapter_{chapter:03d}_part_{part:03d}_{sub_part:03d}.mp3"
+        else:
+            assert file_name == f"chapter_{chapter:03d}_part_{part:03d}.mp3"
         generated = output_dir / file_name
         assert generated.exists()
         assert generated.read_bytes().startswith(b"FAKE_WAV:")

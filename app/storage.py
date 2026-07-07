@@ -25,6 +25,7 @@ def init_db() -> None:
                 voice TEXT NOT NULL,
                 speed REAL NOT NULL,
                 use_gpu INTEGER NOT NULL,
+                concat INTEGER NOT NULL DEFAULT 1,
                 status TEXT NOT NULL,
                 progress REAL NOT NULL,
                 error TEXT,
@@ -32,6 +33,11 @@ def init_db() -> None:
             )
             """
         )
+        # Migration: add concat column for existing databases
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN concat INTEGER NOT NULL DEFAULT 1")
+        except Exception:
+            pass  # Column already exists
         conn.commit()
 
 
@@ -42,12 +48,13 @@ def insert_job(
     voice: str,
     speed: float,
     use_gpu: bool,
+    concat: bool = True,
 ) -> None:
     with get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO jobs (id, source_path, output_dir, voice, speed, use_gpu, status, progress, error, meta_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO jobs (id, source_path, output_dir, voice, speed, use_gpu, concat, status, progress, error, meta_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
@@ -56,6 +63,7 @@ def insert_job(
                 voice,
                 speed,
                 int(use_gpu),
+                int(concat),
                 JobStatus.PENDING.value,
                 0.0,
                 None,

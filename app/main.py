@@ -106,6 +106,7 @@ async def create_job(
     speaker: str = Form(default="0"),
     speed: float = Form(default=1.0),
     use_gpu: bool = Form(default=True),
+    concat: bool = Form(default=True),
 ) -> dict:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required.")
@@ -130,7 +131,7 @@ async def create_job(
 
     logger.info(f"Received file {file.filename}, submitting job...")
     job_id = runner.submit(
-        source_path=upload_path, engine=engine, voice=speaker, speed=speed, use_gpu=use_gpu
+        source_path=upload_path, engine=engine, voice=speaker, speed=speed, use_gpu=use_gpu, concat=concat
     )
     return {"job_id": job_id}
 

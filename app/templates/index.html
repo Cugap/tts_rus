@@ -47,6 +47,10 @@
         <option value="false">Нет</option>
       </select>
     </label>
+    <label style="display:flex;flex-direction:row;align-items:center;gap:6px;font-size:13px;padding:4px 0">
+      <input id="concat-check" type="checkbox" checked />
+      Склеить все части в один MP3-файл (требуется FFmpeg)
+    </label>
     <button type="submit">Запустить</button>
   </form>
 
@@ -59,6 +63,7 @@
     <div id="validation-block" class="hint" hidden></div>
     <div id="validation-stats" hidden></div>
     <div>Ошибка: <span id="error">-</span></div>
+    <div>Итоговый файл: <span id="concat-file" class="mono">-</span></div>
     <ul id="error-list" class="error-list" hidden></ul>
   </div>
 
@@ -73,6 +78,7 @@
     const jobIdEl = document.getElementById("job-id");
     const engineEl = document.getElementById("engine");
     const outputDirEl = document.getElementById("output-dir");
+    const concatFileEl = document.getElementById("concat-file");
     const validationStatsEl = document.getElementById("validation-stats");
 
     let pollTimer = null;
@@ -245,6 +251,7 @@
           progressEl.textContent = `${Math.round((data.progress || 0) * 100)}%`;
           engineEl.textContent = (data.meta && data.meta.engine) || "-";
           outputDirEl.textContent = data.output_dir || "-";
+          concatFileEl.textContent = (data.meta && data.meta.concat_file) || "-";
           errorEl.textContent = data.error || "-";
           if (data.status === "done" || data.status === "failed") {
             clearInterval(pollTimer);
@@ -287,6 +294,7 @@
       fd.append("speaker", document.getElementById("speaker-id").value || "0");
       fd.append("speed", document.getElementById("speed").value || "1.0");
       fd.append("use_gpu", document.getElementById("use-gpu").value);
+      fd.append("concat", document.getElementById("concat-check").checked ? "true" : "false");
 
       try {
         const res = await fetch("/jobs", { method: "POST", body: fd });

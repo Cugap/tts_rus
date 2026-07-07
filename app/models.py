@@ -21,3 +21,4 @@ class JobPayload(BaseModel):
     voice: str
     speed: float
     use_gpu: bool
+    concat: bool = True

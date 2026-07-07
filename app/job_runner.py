@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 import threading
 import uuid
 from pathlib import Path
@@ -33,7 +35,7 @@ class JobRunner:
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
-    def submit(self, source_path: Path, engine: str, voice: str, speed: float, use_gpu: bool) -> str:
+    def submit(self, source_path: Path, engine: str, voice: str, speed: float, use_gpu: bool, concat: bool = True) -> str:
         job_id = str(uuid.uuid4())
         output_dir = self._allocate_output_dir(source_path.stem)
 
@@ -44,6 +46,7 @@ class JobRunner:
             voice=voice,
             speed=speed,
             use_gpu=use_gpu,
+            concat=concat,
         )
 
         payload = JobPayload(
@@ -54,6 +57,7 @@ class JobRunner:
             voice=voice,
             speed=speed,
             use_gpu=use_gpu,
+            concat=concat,
         )
         self._queue.put(payload)
         logger.info(f"Job {job_id} submitted and added to queue.")
@@ -85,6 +89,64 @@ class JobRunner:
                     shutil.rmtree(payload.output_dir, ignore_errors=True)
             finally:
                 self._queue.task_done()
+
+    @staticmethod
+    def _concat_mp3_files(output_dir: Path, book_name: str, manifest: dict) -> str | None:
+        """Склеить все MP3-файлы в output_dir в один через FFmpeg concat demuxer."""
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            logger.warning("FFmpeg не найден в PATH. Склеивание пропущено.")
+            return None
+
+        # Собираем все файлы из manifest в правильном порядке
+        mp3_files: list[Path] = []
+        for entry in manifest.get("files", []):
+            fname = entry.get("file", "")
+            mp3_files.append(output_dir / fname)
+
+        # Проверяем, что файлы существуют
+        existing = [f for f in mp3_files if f.exists()]
+        if len(existing) < 2:
+            logger.info("Меньше 2 файлов — склеивание не требуется.")
+            return None
+
+        # Создаём временный файл списка для concat demuxer
+        concat_list = output_dir / "_concat_list.txt"
+        try:
+            concat_list.write_text(
+                "\n".join(
+                    f"file '{f.name}'" for f in existing
+                ),
+                encoding="utf-8",
+            )
+
+            concat_name = settings.concat_filename.format(book_name=book_name)
+            concat_path = output_dir / concat_name
+
+            logger.info(f"Склеивание {len(existing)} файлов в {concat_name}...")
+            result = subprocess.run(
+                [
+                    ffmpeg, "-y",
+                    "-f", "concat",
+                    "-safe", "0",
+                    "-i", str(concat_list),
+                    "-c", "copy",
+                    str(concat_path),
+                ],
+                capture_output=True, text=True, timeout=3600,
+            )
+            if result.returncode != 0:
+                logger.error(f"FFmpeg concat не удался: {result.stderr[:500]}")
+                return None
+
+            logger.info(f"Склеивание завершено: {concat_name}")
+            return concat_name
+
+        except Exception as exc:
+            logger.error(f"Ошибка при склеивании: {exc}")
+            return None
+        finally:
+            concat_list.unlink(missing_ok=True)
 
     def _process_job(self, payload: JobPayload) -> None:
         job_id = payload.job_id
@@ -119,31 +181,74 @@ class JobRunner:
         # sub_part_num == 0 means no sub-splitting was needed
         # For XTTS we skip accent (`+`) marks — they hurt quality
         _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+
+        def _split_xtts_chunk(text: str, max_chars: int) -> list[str]:
+            """Split text into chunks ≤ max_chars, first by sentence, then by comma, then by words."""
+            if len(text) <= max_chars:
+                return [text]
+
+            # 1) Split by sentences
+            sentences = _SENTENCE_SPLIT_RE.split(text)
+            result: list[str] = []
+            buf: list[str] = []
+            buf_len = 0
+
+            for sent in sentences:
+                if len(sent) > max_chars:
+                    # Single sentence too long — flush buffer first, then split sentence
+                    if buf:
+                        result.append(" ".join(buf))
+                        buf = []
+                        buf_len = 0
+                    # Split long sentence by commas
+                    parts = re.split(r"(?<=,)\s+", sent)
+                    for part in parts:
+                        if len(part) > max_chars:
+                            # Force-split by character count at word boundaries
+                            words = part.split()
+                            wbuf: list[str] = []
+                            wlen = 0
+                            for w in words:
+                                if wlen + len(w) + 1 > max_chars and wbuf:
+                                    result.append(" ".join(wbuf))
+                                    wbuf = []
+                                    wlen = 0
+                                wbuf.append(w)
+                                wlen += len(w) + 1
+                            if wbuf:
+                                result.append(" ".join(wbuf))
+                        else:
+                            if buf_len + len(part) + 1 > max_chars and buf:
+                                result.append(" ".join(buf))
+                                buf = []
+                                buf_len = 0
+                            buf.append(part)
+                            buf_len += len(part) + 1
+                else:
+                    if buf_len + len(sent) + 1 > max_chars and buf:
+                        result.append(" ".join(buf))
+                        buf = []
+                        buf_len = 0
+                    buf.append(sent)
+                    buf_len += len(sent) + 1
+
+            if buf:
+                result.append(" ".join(buf))
+            return result
+
         sub_plan: list[tuple[int, int, int, str]] = []
         for chapter_num, part_num, _, chunk in plan:
             if is_xtts:
                 normalized = normalize_text_no_accents(chunk)
             else:
                 normalized = normalize_text(chunk)
-            if len(normalized) <= settings.xtts_max_chars:
-                sub_plan.append((chapter_num, part_num, 0, normalized))
+            sub_chunks = _split_xtts_chunk(normalized, settings.xtts_max_chars)
+            if len(sub_chunks) == 1:
+                # sub_part_num=0 — дробление не потребовалось
+                sub_plan.append((chapter_num, part_num, 0, sub_chunks[0]))
             else:
-                # Split normalized text into XTTS-safe sub-chunks on sentence boundaries
-                sentences = _SENTENCE_SPLIT_RE.split(normalized)
-                buf: list[str] = []
-                buf_len = 0
-                sub_idx = 0
-                for sent in sentences:
-                    if buf_len + len(sent) + 1 > settings.xtts_max_chars and buf:
-                        sub_idx += 1
-                        sub_plan.append((chapter_num, part_num, sub_idx, " ".join(buf)))
-                        buf = []
-                        buf_len = 0
-                    buf.append(sent)
-                    buf_len += len(sent) + 1
-                if buf:
-                    sub_idx += 1
-                    sub_plan.append((chapter_num, part_num, sub_idx, " ".join(buf)))
+                for sub_idx, sub_text in enumerate(sub_chunks, start=1):
+                    sub_plan.append((chapter_num, part_num, sub_idx, sub_text))
 
         total = len(sub_plan)
         done = 0
@@ -202,10 +307,18 @@ class JobRunner:
             manifest["files"].append(manifest_entry)
             update_job(job_id, progress=progress, meta=manifest)
 
+        # ── Склеивание всех частей в один файл ────────────────────────────
+        concat_file: str | None = None
+        if payload.concat and settings.concat_enabled:
+            concat_file = self._concat_mp3_files(output_dir, source_path.stem, manifest)
+
         # Write manifest once at the end
+        manifest_data = {**manifest}
+        if concat_file:
+            manifest_data["concat_file"] = concat_file
         (output_dir / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2),
+            json.dumps(manifest_data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         logger.info(f"Job {job_id} completed successfully.")
-        update_job(job_id, status=JobStatus.DONE, progress=1.0, meta=manifest, error="")
+        update_job(job_id, status=JobStatus.DONE, progress=1.0, meta=manifest_data, error="")

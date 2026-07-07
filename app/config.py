@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     mp3_bitrate_kbps: int = 128
     mp3_quality_normal: int = 2
 
+    # Concat Settings (склеивание всех частей в один файл)
+    concat_enabled: bool = True
+    concat_filename: str = "{book_name}_full.mp3"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
