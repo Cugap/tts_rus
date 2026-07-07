@@ -130,6 +130,11 @@ def normalize_text(text: str) -> str:
     return text
 
 
+def normalize_text_no_accents(text: str) -> str:
+    """Normalize numbers only — skip RUAccent stress mark (`+`) injection."""
+    return normalize_numbers(text)
+
+
 SUPPORTED_BOOK_EXTENSIONS = {".txt", ".fb2"}
 FB2_NS = "http://www.gribuser.ru/xml/fictionbook/2.0"
 FB2_SKIP_BODY_NAMES = frozenset({"notes", "comments"})

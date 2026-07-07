@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     min_chars_per_chunk: int = 400
     memory_reduction_factor: float = 0.7
 
+    # XTTS v2 character limit per utterance (~182 для русского языка)
+    xtts_max_chars: int = 180
+
     # MP3 Settings
     mp3_bitrate_kbps: int = 128
     mp3_quality_normal: int = 2

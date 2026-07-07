@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import uuid
 from pathlib import Path
@@ -21,6 +22,7 @@ from app.text_processing import (
     load_chapters,
     split_text_safely,
     normalize_text,
+    normalize_text_no_accents,
 )
 from app.tts_engine import TTSEngine
 
@@ -101,16 +103,49 @@ class JobRunner:
             raise ValueError("Book text is empty after parsing.")
 
         engine = TTSEngine(engine=engine_name, voice=voice, speed=speed, use_gpu=use_gpu)
-        plan: list[tuple[int, int, str]] = []
+        is_xtts = engine.engine_mode == "xtts"
+
+        # Plan: list of (chapter_num, part_num, sub_part_num, raw_text)
+        plan: list[tuple[int, int, int, str]] = []
 
         for chapter in chapters:
             chunks = split_text_safely(
                 chapter.text, max_chars=settings.max_chars_per_chunk
             )
             for part_idx, chunk in enumerate(chunks, start=1):
-                plan.append((chapter.number, part_idx, chunk))
+                plan.append((chapter.number, part_idx, 0, chunk))
 
-        total = len(plan)
+        # Normalize, and sub-split entries that exceed XTTS char limit
+        # sub_part_num == 0 means no sub-splitting was needed
+        # For XTTS we skip accent (`+`) marks — they hurt quality
+        _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+        sub_plan: list[tuple[int, int, int, str]] = []
+        for chapter_num, part_num, _, chunk in plan:
+            if is_xtts:
+                normalized = normalize_text_no_accents(chunk)
+            else:
+                normalized = normalize_text(chunk)
+            if len(normalized) <= settings.xtts_max_chars:
+                sub_plan.append((chapter_num, part_num, 0, normalized))
+            else:
+                # Split normalized text into XTTS-safe sub-chunks on sentence boundaries
+                sentences = _SENTENCE_SPLIT_RE.split(normalized)
+                buf: list[str] = []
+                buf_len = 0
+                sub_idx = 0
+                for sent in sentences:
+                    if buf_len + len(sent) + 1 > settings.xtts_max_chars and buf:
+                        sub_idx += 1
+                        sub_plan.append((chapter_num, part_num, sub_idx, " ".join(buf)))
+                        buf = []
+                        buf_len = 0
+                    buf.append(sent)
+                    buf_len += len(sent) + 1
+                if buf:
+                    sub_idx += 1
+                    sub_plan.append((chapter_num, part_num, sub_idx, " ".join(buf)))
+
+        total = len(sub_plan)
         done = 0
         manifest = {
             "engine": getattr(engine, "engine_mode", "unknown"),
@@ -145,25 +180,26 @@ class JobRunner:
                     if current_max <= settings.min_chars_per_chunk:
                         raise
 
-        for chapter_num, part_num, chunk in plan:
-            filename = f"chapter_{chapter_num:03d}_part_{part_num:03d}.mp3"
+        for chapter_num, part_num, sub_part_num, text in sub_plan:
+            if sub_part_num:
+                filename = f"chapter_{chapter_num:03d}_part_{part_num:03d}_{sub_part_num:03d}.mp3"
+            else:
+                filename = f"chapter_{chapter_num:03d}_part_{part_num:03d}.mp3"
             out_file = output_dir / filename
 
-            # Normalize text (numbers to words, accents)
-            normalized_chunk = normalize_text(chunk)
-
             logger.debug(f"Synthesizing {filename}...")
-            synthesize_with_retry(normalized_chunk, out_file)
+            synthesize_with_retry(text, out_file)
 
             done += 1
             progress = done / total
-            manifest["files"].append(
-                {
-                    "chapter": chapter_num,
-                    "part": part_num,
-                    "file": filename,
-                }
-            )
+            manifest_entry: dict = {
+                "chapter": chapter_num,
+                "part": part_num,
+                "file": filename,
+            }
+            if sub_part_num:
+                manifest_entry["sub_part"] = sub_part_num
+            manifest["files"].append(manifest_entry)
             update_job(job_id, progress=progress, meta=manifest)
 
         # Write manifest once at the end
