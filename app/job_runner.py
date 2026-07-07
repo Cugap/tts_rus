@@ -240,15 +240,16 @@ class JobRunner:
         for chapter_num, part_num, _, chunk in plan:
             if is_xtts:
                 normalized = normalize_text_no_accents(chunk)
+                sub_chunks = _split_xtts_chunk(normalized, settings.xtts_max_chars)
+                if len(sub_chunks) == 1:
+                    # sub_part_num=0 — дробление не потребовалось
+                    sub_plan.append((chapter_num, part_num, 0, sub_chunks[0]))
+                else:
+                    for sub_idx, sub_text in enumerate(sub_chunks, start=1):
+                        sub_plan.append((chapter_num, part_num, sub_idx, sub_text))
             else:
                 normalized = normalize_text(chunk)
-            sub_chunks = _split_xtts_chunk(normalized, settings.xtts_max_chars)
-            if len(sub_chunks) == 1:
-                # sub_part_num=0 — дробление не потребовалось
-                sub_plan.append((chapter_num, part_num, 0, sub_chunks[0]))
-            else:
-                for sub_idx, sub_text in enumerate(sub_chunks, start=1):
-                    sub_plan.append((chapter_num, part_num, sub_idx, sub_text))
+                sub_plan.append((chapter_num, part_num, 0, normalized))
 
         total = len(sub_plan)
         done = 0
