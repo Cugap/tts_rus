@@ -7,6 +7,17 @@ from fastapi.testclient import TestClient
 from app import main
 
 
+def test_engines_endpoint_lists_xtts() -> None:
+    with TestClient(main.app) as client:
+        response = client.get("/engines")
+    assert response.status_code == 200
+    engines = response.json()
+    assert "xtts" in engines
+    assert engines["xtts"]["name"] == "XTTS v2 (Клонирование голоса)"
+    assert "hf_vits_local" in engines
+    assert "sapi" in engines
+
+
 def test_validate_book_endpoint_accepts_sample() -> None:
     sample = Path(__file__).resolve().parent.parent / "book_example" / "sample.fb2"
     with TestClient(main.app) as client:

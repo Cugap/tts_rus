@@ -115,3 +115,11 @@ def list_jobs() -> list[dict[str, Any]]:
         item["meta"] = json.loads(item.pop("meta_json") or "{}")
         result.append(item)
     return result
+
+
+def clear_jobs() -> int:
+    """Delete all jobs from DB. Returns number of deleted rows."""
+    with get_conn() as conn:
+        cur = conn.execute("DELETE FROM jobs")
+        conn.commit()
+        return cur.rowcount

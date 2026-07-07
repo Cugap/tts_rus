@@ -48,6 +48,13 @@ def index() -> FileResponse:
 @app.get("/engines")
 def get_engines() -> dict:
     return {
+        "xtts": {
+            "name": "XTTS v2 (Клонирование голоса)",
+            "speakers": [
+                {"id": "speakers/my_voice.wav", "name": "Мой голос"},
+                {"id": "default", "name": "Встроенный (speakers_xtts)"},
+            ],
+        },
         "hf_vits_local": {
             "name": "VITS (Локальная модель)",
             "speakers": [

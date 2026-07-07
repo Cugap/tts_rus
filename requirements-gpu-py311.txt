@@ -1,5 +1,14 @@
 # Optional profile for local neural TTS with GPU.
 # Recommended interpreter: Python 3.11 or 3.12.
 
-torch
-transformers
+torch>=2.1,<4.0
+torchaudio>=2.1,<4.0
+transformers>=4.36,<6.0
+soundfile>=0.12,<2.0
+
+# XTTS v2 — requires Python <3.14 due to coqui-tts dependency conflicts.
+# If on Python 3.14+, create a separate venv with Python 3.11/3.12:
+#   python3.11 -m venv xtts_venv
+#   xtts_venv\Scripts\pip install coqui-tts torch torchaudio
+# Then set XTTS_PYTHON env var to xtts_venv\Scripts\python.exe
+# coqui-tts>=0.27,<1.0

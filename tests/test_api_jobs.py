@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app import job_runner, main, text_processing
 from app.models import JobStatus
 from app.storage import init_db
+from app.tts_engine import XTTS_DEFAULT_SPEAKER, XTTS_MODEL_DIR, TTSEngine
 
 
 class FakeTTSEngine:
@@ -84,3 +85,19 @@ def test_api_create_job_and_get_status(tmp_path, monkeypatch) -> None:
         assert filename == f"chapter_{chapter:03d}_part_{part:03d}.mp3"
         generated = out_job_dir / filename
         assert generated.exists()
+
+
+def test_tts_engine_resolve_speaker_wav() -> None:
+    engine = TTSEngine(engine="sapi", voice="default", use_gpu=False)
+
+    # "default" → prefers my_voice.wav if exists, else speakers_xtts.pth
+    resolved_default = engine._resolve_speaker_wav("default")
+    if XTTS_DEFAULT_SPEAKER.exists():
+        assert resolved_default == str(XTTS_DEFAULT_SPEAKER)
+    else:
+        assert resolved_default == str(XTTS_MODEL_DIR / "speakers_xtts.pth")
+
+    # Known speaker file path
+    if XTTS_DEFAULT_SPEAKER.exists():
+        resolved = engine._resolve_speaker_wav(str(XTTS_DEFAULT_SPEAKER))
+        assert resolved == str(XTTS_DEFAULT_SPEAKER)

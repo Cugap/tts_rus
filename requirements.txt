@@ -11,3 +11,4 @@ razdel>=0.5,<1.0
 lameenc>=1.0,<2.0
 loguru>=0.7,<1.0
 tenacity>=8.0,<10.0
+soundfile>=0.12,<2.0
