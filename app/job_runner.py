@@ -25,6 +25,7 @@ from app.text_processing import (
     split_text_safely,
     normalize_text,
     normalize_text_no_accents,
+    normalize_text_for_xtts,
 )
 from app.tts_engine import TTSEngine
 
@@ -236,10 +237,17 @@ class JobRunner:
                 result.append(" ".join(buf))
             return result
 
+        # Константа для пауз между предложениями:
+        # Двойной пробел после точки/вопроса/восклицания заставляет XTTS/VITS
+        # делать более длинную естественную паузу.
+        _PAUSE_MARKER_RE = re.compile(r"(?<=[.!?])\s+(?=[А-ЯA-Z])")
+
         sub_plan: list[tuple[int, int, int, str]] = []
         for chapter_num, part_num, _, chunk in plan:
             if is_xtts:
-                normalized = normalize_text_no_accents(chunk)
+                normalized = normalize_text_for_xtts(chunk)
+                # Двойные пробелы после знаков препинания → более длинные паузы
+                normalized = _PAUSE_MARKER_RE.sub("  ", normalized)
                 sub_chunks = _split_xtts_chunk(normalized, settings.xtts_max_chars)
                 if len(sub_chunks) == 1:
                     # sub_part_num=0 — дробление не потребовалось
@@ -249,6 +257,8 @@ class JobRunner:
                         sub_plan.append((chapter_num, part_num, sub_idx, sub_text))
             else:
                 normalized = normalize_text(chunk)
+                # Для VITS/SAPI: двойные пробелы после знаков препинания
+                normalized = _PAUSE_MARKER_RE.sub("  ", normalized)
                 sub_plan.append((chapter_num, part_num, 0, normalized))
 
         total = len(sub_plan)

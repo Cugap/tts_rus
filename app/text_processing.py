@@ -135,6 +135,18 @@ def normalize_text_no_accents(text: str) -> str:
     return normalize_numbers(text)
 
 
+def normalize_text_for_xtts(text: str) -> str:
+    """Normalize for XTTS: numbers only — no stress marks.
+
+    XTTS v2 uses a BPE tokenizer (VoiceBpeTokenizer) that strips Unicode
+    combining characters and other diacritics.  ``ruaccent`` stress markers
+    (``+`` or U+0301) are lost during tokenization, so we skip accent
+    injection entirely for XTTS and rely on the model's contextual
+    pronunciation instead.
+    """
+    return normalize_text_no_accents(text)
+
+
 SUPPORTED_BOOK_EXTENSIONS = {".txt", ".fb2"}
 FB2_NS = "http://www.gribuser.ru/xml/fictionbook/2.0"
 FB2_SKIP_BODY_NAMES = frozenset({"notes", "comments"})

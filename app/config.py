@@ -16,8 +16,21 @@ class Settings(BaseSettings):
     xtts_max_chars: int = 180
 
     # MP3 Settings
-    mp3_bitrate_kbps: int = 128
+    mp3_bitrate_kbps: int = 192       # Повышен с 128 для лучшего качества
     mp3_quality_normal: int = 2
+    mp3_use_vbr: bool = True          # Использовать VBR вместо CBR
+    mp3_vbr_quality: float = 2.0      # VBR quality (0=лучшее, 9=худшее)
+
+    # XTTS v2 generation parameters (для стабильности и качества)
+    xtts_temperature: float = 0.65      # Чуть ниже дефолта — стабильнее
+    xtts_top_k: int = 50                # Top-K sampling
+    xtts_top_p: float = 0.85            # Nucleus sampling
+    xtts_repetition_penalty: float = 5.0  # Защита от зацикливания
+
+    # Audio post-processing
+    audio_normalize_peak: bool = True   # Нормализация пиковой громкости
+    audio_trim_silence: bool = True     # Обрезка тишины в начале/конце
+    audio_trim_threshold_db: float = -40.0  # Порог тишины в dB
 
     # Concat Settings (склеивание всех частей в один файл)
     concat_enabled: bool = True

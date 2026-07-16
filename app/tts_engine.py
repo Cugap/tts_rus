@@ -242,8 +242,67 @@ class TTSEngine:
         else:
             raise RuntimeError("No available TTS engine")
 
+        # Постобработка WAV: обрезка тишины + нормализация громкости
+        if temp_wav.exists() and temp_wav.stat().st_size > 44:
+            self._postprocess_wav(temp_wav)
+
         if is_mp3:
             self._convert_wav_to_mp3(temp_wav, out_path)
+
+    def _postprocess_wav(self, wav_path: Path) -> None:
+        """Trim silence and normalize peak volume of a WAV file in-place."""
+        try:
+            import numpy as np
+
+            with wave.open(str(wav_path), "rb") as wf:
+                sr = wf.getframerate()
+                nchannels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                nframes = wf.getnframes()
+                raw = wf.readframes(nframes)
+
+            if sampwidth == 2:
+                dtype = np.int16
+            elif sampwidth == 4:
+                dtype = np.int32
+            else:
+                return  # unsupported, skip
+
+            data = np.frombuffer(raw, dtype=dtype).astype(np.float32)
+            if nchannels > 1:
+                data = data.reshape(-1, nchannels)
+                # Convert to mono by averaging channels
+                data = data.mean(axis=1)
+
+            # ── Trim leading/trailing silence ──────────────────────────────
+            if settings.audio_trim_silence:
+                threshold_abs = 10.0 ** (settings.audio_trim_threshold_db / 20.0) * 32767.0
+                mask = np.abs(data) > threshold_abs
+                if mask.any():
+                    # Extend boundaries by 50ms for safety
+                    safety = int(sr * 0.05)
+                    start = max(0, int(np.argmax(mask)) - safety)
+                    end = min(len(data), len(data) - int(np.argmax(mask[::-1])) + safety)
+                    data = data[start:end]
+
+            # ── Peak normalization (to -1 dB) ──────────────────────────────
+            if settings.audio_normalize_peak and len(data) > 0:
+                peak = np.max(np.abs(data))
+                if peak > 0:
+                    target_peak = 32767.0 * 0.89  # -1 dBFS
+                    gain = target_peak / peak
+                    data = np.clip(data * gain, -32767.0, 32767.0)
+
+            # Write back
+            pcm_out = data.astype(dtype).tobytes()
+            with wave.open(str(wav_path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(sampwidth)
+                wf.setframerate(sr)
+                wf.writeframes(pcm_out)
+
+        except Exception as exc:
+            logger.warning(f"Post-processing WAV не удался: {exc}")
 
     def _convert_wav_to_mp3(self, wav_path: Path, mp3_path: Path) -> None:
         import lameenc
@@ -254,10 +313,18 @@ class TTSEngine:
             pcm_data = wav.readframes(wav.getnframes())
 
         encoder = lameenc.Encoder()
-        encoder.set_bit_rate(settings.mp3_bitrate_kbps)
         encoder.set_in_sample_rate(sample_rate)
         encoder.set_channels(channels)
         encoder.set_quality(settings.mp3_quality_normal)
+
+        if settings.mp3_use_vbr:
+            # VBR: качество от 0 (лучшее) до 9 (худшее)
+            vbr_quality = max(0, min(9, int(round(settings.mp3_vbr_quality))))
+            encoder.set_vbr(2)  # mode 2 = vbr_rh (стандартный VBR в LAME)
+            encoder.set_vbr_quality(vbr_quality)
+        else:
+            # CBR с повышенным битрейтом
+            encoder.set_bit_rate(settings.mp3_bitrate_kbps)
 
         mp3_data = encoder.encode(pcm_data)
         mp3_data += encoder.flush()
@@ -349,6 +416,11 @@ class TTSEngine:
                     speaker_wav=self._xtts_speaker_wav,
                     language="ru",
                     file_path=str(out_path),
+                    temperature=settings.xtts_temperature,
+                    top_k=settings.xtts_top_k,
+                    top_p=settings.xtts_top_p,
+                    repetition_penalty=settings.xtts_repetition_penalty,
+                    speed=self.speed,
                 )
                 logger.debug(f"XTTS in-process синтез завершён: {out_path}")
                 return
@@ -366,6 +438,11 @@ class TTSEngine:
                 self._xtts_speaker_wav or str(XTTS_DEFAULT_SPEAKER),
                 str(out_path),
                 text,
+                str(settings.xtts_temperature),
+                str(settings.xtts_top_k),
+                str(settings.xtts_top_p),
+                str(settings.xtts_repetition_penalty),
+                str(self.speed),
             ],
             capture_output=True,
             text=True,

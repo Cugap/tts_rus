@@ -107,8 +107,19 @@ def check() -> None:
         sys.exit(1)
 
 
-def synthesize(model_dir: str, speaker_wav: str, output_path: str, text: str) -> None:
-    """Run XTTS synthesis."""
+def synthesize(
+    model_dir: str,
+    speaker_wav: str,
+    output_path: str,
+    text: str,
+    *,
+    temperature: float = 0.65,
+    top_k: int = 50,
+    top_p: float = 0.85,
+    repetition_penalty: float = 5.0,
+    speed: float = 1.0,
+) -> None:
+    """Run XTTS synthesis with configurable generation parameters."""
     from TTS.api import TTS  # type: ignore
 
     tts = TTS(model_path=model_dir, config_path=str(Path(model_dir) / "config.json"))
@@ -117,6 +128,11 @@ def synthesize(model_dir: str, speaker_wav: str, output_path: str, text: str) ->
         speaker_wav=speaker_wav,
         language="ru",
         file_path=output_path,
+        temperature=temperature,
+        top_k=top_k,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
+        speed=speed,
     )
 
 
@@ -127,7 +143,8 @@ def main() -> None:
 
     if len(sys.argv) < 5:
         print(
-            "Usage: python _xtts_synthesize.py <model_dir> <speaker_wav> <output_path> <text>",
+            "Usage: python _xtts_synthesize.py <model_dir> <speaker_wav> <output_path> <text> "
+            "[temperature] [top_k] [top_p] [repetition_penalty] [speed]",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -137,6 +154,19 @@ def main() -> None:
     output_path = sys.argv[3]
     text = sys.argv[4]
 
+    # Optional generation parameters (passed from tts_engine.py for subprocess path)
+    kwargs: dict = {}
+    if len(sys.argv) > 5:
+        kwargs["temperature"] = float(sys.argv[5])
+    if len(sys.argv) > 6:
+        kwargs["top_k"] = int(sys.argv[6])
+    if len(sys.argv) > 7:
+        kwargs["top_p"] = float(sys.argv[7])
+    if len(sys.argv) > 8:
+        kwargs["repetition_penalty"] = float(sys.argv[8])
+    if len(sys.argv) > 9:
+        kwargs["speed"] = float(sys.argv[9])
+
     # Validate args
     if not Path(model_dir).exists():
         print(f"ERROR: model_dir not found: {model_dir}", file=sys.stderr)
@@ -145,7 +175,7 @@ def main() -> None:
         print(f"ERROR: speaker_wav not found: {speaker_wav}", file=sys.stderr)
         sys.exit(1)
 
-    synthesize(model_dir, speaker_wav, output_path, text)
+    synthesize(model_dir, speaker_wav, output_path, text, **kwargs)
 
 
 if __name__ == "__main__":
