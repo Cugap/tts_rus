@@ -81,6 +81,22 @@ def _apply_tts_shims() -> None:
         _ta.load = _patched_load
     except Exception:
         pass
+    # Patch XTTS tokenizer's per-language char_limit to avoid spurious warnings.
+    # char_limits is an *instance* attribute (set in __init__), not a class attr.
+    # Monkey-patch __init__ so every instance gets ru→600 instead of ru→182.
+    try:
+        from TTS.tts.models.xtts import VoiceBpeTokenizer
+
+        _orig_init = VoiceBpeTokenizer.__init__
+
+        def _patched_init(self, vocab_file=None):
+            _orig_init(self, vocab_file)
+            if hasattr(self, "char_limits") and "ru" in self.char_limits:
+                self.char_limits["ru"] = 600
+
+        VoiceBpeTokenizer.__init__ = _patched_init
+    except Exception:
+        pass
 
 
 def _load_xtts_model(device: str = "cpu") -> object:
@@ -205,14 +221,25 @@ class TTSEngine:
         self._engine_mode = "sapi"
 
     def _resolve_speaker_wav(self, voice: str) -> str:
-        """Resolve a speaker reference audio path from voice setting."""
-        custom = Path(voice)
-        if custom.exists():
-            return str(custom)
+        """Resolve a speaker reference WAV from voice setting.
+
+        ``voice`` can be an absolute path, a path relative to the repo root,
+        or ``"default"`` (uses ``speakers/my_voice.wav``).
+        """
+        repo_root = Path(__file__).resolve().parent.parent
+
+        # Try as-is (absolute), then relative to repo root
+        for candidate in (Path(voice), repo_root / voice):
+            if candidate.exists():
+                logger.info(f"XTTS голос: {candidate}")
+                return str(candidate)
+
+        # Fallback
         if XTTS_DEFAULT_SPEAKER.exists():
+            logger.info(f"XTTS голос (fallback): {XTTS_DEFAULT_SPEAKER}")
             return str(XTTS_DEFAULT_SPEAKER)
-        # Fallback: use the built-in speaker embedding
-        return str(XTTS_MODEL_DIR / "speakers_xtts.pth")
+
+        raise FileNotFoundError(f"XTTS: голос не найден: {voice}")
 
     @staticmethod
     def _memory_guard(min_free_mb: int = 300) -> None:
@@ -388,22 +415,54 @@ class TTSEngine:
             wav_file.writeframes(pcm16)
 
     @staticmethod
-    def _truncate_xtts_text(text: str, max_chars: int = 180) -> str:
-        """Truncate text to fit XTTS character limit, breaking at last space."""
-        if len(text) <= max_chars:
+    def _validate_xtts_text(text: str, max_tokens: int = 380) -> str:
+        """Ensure text fits within XTTS GPT token limit (402 tokens)."""
+        if len(text) <= 250:
             return text
-        logger.warning(f"XTTS текст превышает лимит ({len(text)} > {max_chars}): усекаем")
-        truncated = text[:max_chars]
-        # Откатываемся до последнего пробела, чтобы не разрывать слово
+
+        try:
+            from TTS.tts.models.xtts import VoiceBpeTokenizer
+
+            tokenizer = VoiceBpeTokenizer(vocab_file=str(XTTS_MODEL_DIR / "vocab.json"))
+            # Raise char_limit so check_input_length() doesn't warn.
+            # The actual GPT limit is 402 tokens, not 182 characters.
+            if hasattr(tokenizer, "char_limits"):
+                tokenizer.char_limits["ru"] = 600
+            ids = tokenizer.encode(text, "ru")  # type: ignore[arg-type]
+            n_tokens = len(ids)
+        except Exception:
+            # Tokenizer not available (e.g. subprocess path) — use char heuristic:
+            # Russian ~1.5–2.0 chars/token; 2.0 is safe worst-case.
+            n_tokens = int(len(text) / 2.0)
+
+        if n_tokens <= max_tokens:
+            return text
+
+        logger.warning(
+            f"XTTS текст превышает лимит ({n_tokens} > {max_tokens} токенов): усекаем"
+        )
+        # Estimate truncation point in characters
+        ratio = len(text) / max(n_tokens, 1)
+        trunc_at = int(max_tokens * ratio * 0.85)  # 15% safety margin
+        if trunc_at >= len(text):
+            return text
+
+        truncated = text[:trunc_at]
+        # Try to break at the last sentence-ending punctuation
+        for punct in (". ", "! ", "? ", ".\" ", "!\" ", "?\" "):
+            last = truncated.rfind(punct)
+            if last > trunc_at // 2:
+                return truncated[: last + 1]
+        # Fallback: break at last space
         last_space = truncated.rfind(" ")
-        if last_space > max_chars // 2:
-            truncated = truncated[:last_space]
+        if last_space > trunc_at // 2:
+            return truncated[:last_space]
         return truncated
 
     def _xtts_to_file(self, text: str, out_path: Path) -> None:
         assert self._xtts_model is not None
 
-        text = self._truncate_xtts_text(text)
+        text = self._validate_xtts_text(text)
 
         _err_output: str = ""
 
@@ -435,7 +494,7 @@ class TTSEngine:
                 _xtts_python(),
                 str(XTTS_HELPER_SCRIPT),
                 str(XTTS_MODEL_DIR),
-                self._xtts_speaker_wav or str(XTTS_DEFAULT_SPEAKER),
+                self._xtts_speaker_wav,
                 str(out_path),
                 text,
                 str(settings.xtts_temperature),

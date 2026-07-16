@@ -47,13 +47,19 @@ def index() -> FileResponse:
 
 @app.get("/engines")
 def get_engines() -> dict:
+    # Сканируем папку speakers — все WAV-файлы становятся доступными голосами
+    speakers_dir = Path(__file__).resolve().parent.parent / "speakers"
+    wav_speakers: list[dict] = []
+    if speakers_dir.exists():
+        for wav in sorted(speakers_dir.glob("*.wav")):
+            name = wav.stem.replace("_", " ").title()
+            rel = str(wav.relative_to(speakers_dir.parent))
+            wav_speakers.append({"id": rel, "name": name})
+
     return {
         "xtts": {
             "name": "XTTS v2 (Клонирование голоса)",
-            "speakers": [
-                {"id": "speakers/my_voice.wav", "name": "Мой голос"},
-                {"id": "default", "name": "Встроенный (speakers_xtts)"},
-            ],
+            "speakers": wav_speakers if wav_speakers else [{"id": "speakers/my_voice.wav", "name": "My Voice"}],
         },
         "hf_vits_local": {
             "name": "VITS (Локальная модель)",

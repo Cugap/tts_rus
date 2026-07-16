@@ -114,9 +114,9 @@ def synthesize(
     text: str,
     *,
     temperature: float = 0.65,
-    top_k: int = 50,
-    top_p: float = 0.85,
-    repetition_penalty: float = 5.0,
+    top_k: int = 30,
+    top_p: float = 0.80,
+    repetition_penalty: float = 20.0,
     speed: float = 1.0,
 ) -> None:
     """Run XTTS synthesis with configurable generation parameters."""

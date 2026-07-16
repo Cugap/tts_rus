@@ -122,8 +122,32 @@ def normalize_numbers(text: str) -> str:
     return re.sub(r"\b\d+\b", replace_num, text)
 
 
+def normalize_punctuation(text: str) -> str:
+    """Replace typographic characters absent from XTTS/VITS vocab with ASCII equivalents.
+
+    Characters NOT in XTTS BPE vocab (verified against xtts_models/v2.0.2/vocab.json):
+      \u2013 (en dash), \u2014 (em dash), \u2026 (ellipsis),
+      \u201e (low-9 quote), \u201c/\u201d (curly quotes).
+
+    These produce audible artifacts because the model has no token for them.
+    """
+    text = text.replace("\u2014", " \u2014 ")  # em dash  — keep with spaces for pause
+    text = text.replace("\u2013", " \u2014 ")  # en dash  → em dash with spaces (dialogue marker, ranges)
+    text = text.replace("\u2026", "...")        # ellipsis  → three dots
+    # Curly quotes → guillemets („« ... »" in Russian typography)
+    text = text.replace("\u201e", "\u00ab")     # „ → «  (low-9 opening)
+    text = text.replace("\u201c", "\u00bb")     # " → »  (curly closing)
+    text = text.replace("\u201d", "\u00bb")     # " → »  (curly closing alt)
+    # Remove soft hyphen and other zero-width characters
+    text = text.replace("\u00ad", "")           # soft hyphen
+    text = text.replace("\u200b", "")           # zero-width space
+    text = text.replace("\ufeff", "")           # BOM / zero-width no-break space
+    return text
+
+
 def normalize_text(text: str) -> str:
     text = normalize_numbers(text)
+    text = normalize_punctuation(text)
     acc = get_accentizer()
     if acc:
         text = acc.process_all(text)
@@ -131,8 +155,10 @@ def normalize_text(text: str) -> str:
 
 
 def normalize_text_no_accents(text: str) -> str:
-    """Normalize numbers only — skip RUAccent stress mark (`+`) injection."""
-    return normalize_numbers(text)
+    """Normalize numbers and punctuation — skip RUAccent stress mark (`+`) injection."""
+    text = normalize_numbers(text)
+    text = normalize_punctuation(text)
+    return text
 
 
 def normalize_text_for_xtts(text: str) -> str:

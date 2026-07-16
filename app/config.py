@@ -8,12 +8,12 @@ class Settings(BaseSettings):
     db_path: Path = base_dir / "jobs.db"
 
     # TTS Settings
-    max_chars_per_chunk: int = 600
-    min_chars_per_chunk: int = 400
+    max_chars_per_chunk: int = 300    # XTTS: ~175/402 токенов — запас от деградации
+    min_chars_per_chunk: int = 100
     memory_reduction_factor: float = 0.7
 
-    # XTTS v2 character limit per utterance (~182 для русского языка)
-    xtts_max_chars: int = 180
+    # XTTS v2 character limit per utterance
+    xtts_max_chars: int = 300
 
     # MP3 Settings
     mp3_bitrate_kbps: int = 192       # Повышен с 128 для лучшего качества
@@ -22,10 +22,10 @@ class Settings(BaseSettings):
     mp3_vbr_quality: float = 2.0      # VBR quality (0=лучшее, 9=худшее)
 
     # XTTS v2 generation parameters (для стабильности и качества)
-    xtts_temperature: float = 0.65      # Чуть ниже дефолта — стабильнее
-    xtts_top_k: int = 50                # Top-K sampling
-    xtts_top_p: float = 0.85            # Nucleus sampling
-    xtts_repetition_penalty: float = 5.0  # Защита от зацикливания
+    xtts_temperature: float = 0.65       # Ниже дефолта — стабильнее, меньше повторов
+    xtts_top_k: int = 30                 # Уже диапазон — меньше вариативности
+    xtts_top_p: float = 0.80             # Чуть строже nucleus sampling
+    xtts_repetition_penalty: float = 20.0  # Агрессивная защита от зацикливания
 
     # Audio post-processing
     audio_normalize_peak: bool = True   # Нормализация пиковой громкости
